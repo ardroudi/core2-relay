@@ -33,6 +33,8 @@ from collections import deque
 from fastapi import FastAPI, HTTPException, Request, Response
 from fastapi.responses import JSONResponse
 
+RELAY_VERSION = "2026.08.17-1"   # bump when deploying; see README
+
 TOKEN = os.environ.get("RELAY_TOKEN", "")
 TTL_SECONDS = 120          # unclaimed items are dropped
 MAX_ITEMS = 8              # per queue; a slow consumer must not grow this
@@ -166,10 +168,22 @@ async def device_event(request: Request, token: str = ""):
 
 # --------------------------------------------------------------------- health
 @app.get("/health")
-async def health():
+async def health(token: str = ""):
+    """Liveness, open to anyone. Device telemetry only with the token.
+
+    Battery, signal and firmware version say something about where the owner
+    is and what they are carrying, so they are not for passers-by. The queue
+    depths carry no such meaning and stay open, because a liveness check that
+    needs a secret is a liveness check nobody runs.
+
+    relay_version is here so a deploy can be confirmed without guessing from
+    the presence of a key - which is exactly how the last one was diagnosed,
+    an absent key and a null value being indistinguishable from outside.
+    """
     sweep()
-    return {
+    body = {
         "ok": True,
+        "relay_version": RELAY_VERSION,
         "uptime_s": int(time.time() - stats["started"]),
         "commands_waiting": len(commands),
         "events_waiting": len(events),
@@ -177,9 +191,12 @@ async def health():
         "commands_total": stats["commands"],
         "events_total": stats["events"],
         "token_configured": bool(TOKEN),
-        "device": ({**device, "seen_s_ago": round(time.time() - device["seen"], 1)}
-                   if device else None),
     }
+    if TOKEN and token == TOKEN:
+        body["device"] = ({**device,
+                           "seen_s_ago": round(time.time() - device["seen"], 1)}
+                          if device else None)
+    return body
 
 
 @app.get("/")
