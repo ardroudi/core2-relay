@@ -33,7 +33,7 @@ from collections import deque
 from fastapi import FastAPI, HTTPException, Request, Response
 from fastapi.responses import JSONResponse
 
-RELAY_VERSION = "2026.08.17-2"   # bump when deploying; see README
+RELAY_VERSION = "2026.08.17-3"   # bump when deploying; see README
 
 TOKEN = os.environ.get("RELAY_TOKEN", "")
 TTL_SECONDS = 120          # unclaimed items are dropped
@@ -136,6 +136,17 @@ async def host_events(token: str = "", wait: float = 25.0,
 
 
 # ---------------------------------------------------------------- device side
+def _host_headers() -> dict:
+    """Tell the device how long ago the host last listened.
+
+    A header rather than a body field, so the long-poll's 204 can carry it too
+    without inventing a body for "nothing happened". -1 means never seen.
+    """
+    if not host:
+        return {"X-Host-Seen": "-1"}
+    return {"X-Host-Seen": str(int(time.time() - host["seen"]))}
+
+
 @app.get("/device/commands")
 async def device_commands(token: str = "", wait: float = 25.0,
                           bat: int | None = None, rssi: int | None = None,
@@ -147,8 +158,8 @@ async def device_commands(token: str = "", wait: float = 25.0,
                        "uptime_s": up, "free_heap": heap, "fw": fw})
     item = await wait_for(commands, min(max(wait, 1.0), 60.0))
     if item is None:
-        return Response(status_code=204)
-    return JSONResponse(item)
+        return Response(status_code=204, headers=_host_headers())
+    return JSONResponse(item, headers=_host_headers())
 
 
 @app.get("/device/audio/{aid}")
