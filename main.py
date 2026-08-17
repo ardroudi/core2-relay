@@ -33,7 +33,7 @@ from collections import deque
 from fastapi import FastAPI, HTTPException, Request, Response
 from fastapi.responses import JSONResponse
 
-RELAY_VERSION = "2026.08.17-1"   # bump when deploying; see README
+RELAY_VERSION = "2026.08.17-2"   # bump when deploying; see README
 
 TOKEN = os.environ.get("RELAY_TOKEN", "")
 TTL_SECONDS = 120          # unclaimed items are dropped
@@ -53,6 +53,12 @@ stats = {"started": time.time(), "commands": 0, "events": 0}
 # device already makes, so there is no extra request to fail independently -
 # and "is it alive?" stops being something you infer from queue depths.
 device: dict = {}
+
+# And the host. The device was never the fragile end - the PC is, and when its
+# daemon dies you speak into a microphone nobody is listening to, with nothing
+# to tell you. Recorded on the poll the daemon already makes, same as the
+# device's, so there is no extra request to fail on its own.
+host: dict = {}
 
 
 def check(token: str | None) -> None:
@@ -114,9 +120,11 @@ async def host_mood(token: str = "", m: str = "idle"):
 
 
 @app.get("/host/events")
-async def host_events(token: str = "", wait: float = 25.0):
+async def host_events(token: str = "", wait: float = 25.0,
+                      note: str | None = None):
     """Returns the next recording as raw PCM, or 204 when nothing arrives."""
     check(token)
+    host.update({"seen": time.time(), "note": note})
     item = await wait_for(events, min(max(wait, 1.0), 60.0))
     if item is None:
         return Response(status_code=204)
@@ -196,6 +204,9 @@ async def health(token: str = ""):
         body["device"] = ({**device,
                            "seen_s_ago": round(time.time() - device["seen"], 1)}
                           if device else None)
+        body["host"] = ({**host,
+                         "seen_s_ago": round(time.time() - host["seen"], 1)}
+                        if host else None)
     return body
 
 
