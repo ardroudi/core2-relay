@@ -47,6 +47,11 @@ audio: dict[str, tuple[float, bytes]] = {}
 
 stats = {"started": time.time(), "commands": 0, "events": 0}
 
+# Last thing the device told us about itself. It rides along on the poll the
+# device already makes, so there is no extra request to fail independently -
+# and "is it alive?" stops being something you infer from queue depths.
+device: dict = {}
+
 
 def check(token: str | None) -> None:
     if not TOKEN:
@@ -122,8 +127,14 @@ async def host_events(token: str = "", wait: float = 25.0):
 
 # ---------------------------------------------------------------- device side
 @app.get("/device/commands")
-async def device_commands(token: str = "", wait: float = 25.0):
+async def device_commands(token: str = "", wait: float = 25.0,
+                          bat: int | None = None, rssi: int | None = None,
+                          up: int | None = None, heap: int | None = None,
+                          fw: str | None = None):
     check(token)
+    if bat is not None or rssi is not None:
+        device.update({"seen": time.time(), "battery_pct": bat, "rssi": rssi,
+                       "uptime_s": up, "free_heap": heap, "fw": fw})
     item = await wait_for(commands, min(max(wait, 1.0), 60.0))
     if item is None:
         return Response(status_code=204)
@@ -166,6 +177,8 @@ async def health():
         "commands_total": stats["commands"],
         "events_total": stats["events"],
         "token_configured": bool(TOKEN),
+        "device": ({**device, "seen_s_ago": round(time.time() - device["seen"], 1)}
+                   if device else None),
     }
 
 
